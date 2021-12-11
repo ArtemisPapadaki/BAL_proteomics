@@ -1,0 +1,301 @@
+---
+title: "Bal Proteomics: WGCNA Analysis"
+author: "Artemis Papadaki"
+
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 2
+---
+
+# Setup and read in data
+
+```{r setup, include = FALSE}
+# rmd options
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(caret)
+library(lattice)
+library(gridExtra)
+library(splines)
+library(ggeffects)
+library(WGCNA)
+library(flashClust)
+library(tidyverse)
+
+theme_set(theme_pubr())
+
+
+
+```
+
+# Create a signed weighted protein co-expression network 
+# Read the Data, Define the expression data and the Trait of Interest
+
+
+```{r}
+bal_long <- read.csv("../data/bal_long_personal_clinical_flow.csv")
+
+dim(bal_long) # 12180   193
+bal_long$CaseControl <- factor(bal_long$CaseControl, levels = c("ctrl", "case" ))
+
+bal_matrix <- bal_long %>% 
+  dplyr::select(SampleID, GeneID, NPX) %>% 
+ dplyr::filter(!is.na(NPX)) %>% 
+  tidyr::spread(GeneID, NPX) %>% 
+  column_to_rownames('SampleID')   # contains only NPX values
+
+dim(bal_matrix) # 28 435
+
+bal_matrix <- preProcess(bal_matrix, method = c("knnImpute", "scale", "center")) %>%
+  predict(bal_matrix) %>%
+  as.matrix()
+rownames(bal_matrix)
+
+
+bal_wide <- bal_long %>% 
+    dplyr::select(SampleID, GeneID, NPX, CaseControl) %>% 
+    dplyr::filter(!is.na(NPX)) %>% 
+    tidyr::spread(GeneID, NPX)   # contains NPX values , SampleID, CaseControl
+dim(bal_wide) # 28 437
+rownames(bal_wide) <- bal_wide$SampleID
+
+
+datExpr=as.data.frame(bal_matrix)
+
+rownames(datExpr) ==rownames(bal_matrix)
+
+traitData <- bal_wide[, c(1,2)]
+rownames(traitData) == traitData$SampleID
+
+
+```
+
+
+
+
+```{r}
+
+library(WGCNA)
+
+
+
+set.seed(1)
+####################################
+
+# creation of adjacency matrix 
+
+####################################
+A = adjacency(datExpr, power = 13, type="signed")
+
+####################################
+#definition of the dissimilarity based on the topological overlap
+####################################
+dissTOM =TOMdist(A)
+
+####################################
+# creation of the hierarchical clustering tree
+###################################
+library(flashClust)
+
+
+geneTree = flashClust(as.dist(dissTOM),method="average")
+# here we define the modules by cutting branches 
+
+
+####################################
+# identify modules
+####################################
+moduleLabels1=cutreeDynamic(dendro=geneTree,
+                                  distM=dissTOM, 
+                                  method="hybrid", 
+                                  deepSplit=2,
+                                  pamRespectsDendro=F,
+                                  minClusterSize=15)
+####################################
+# Convert labels to colors for plotting 
+####################################
+moduleColors2=labels2colors(moduleLabels1)
+unique(moduleColors2) 
+
+# "turquoise" "yellow"    "blue"      "green"     "red"       "pink"      "brown"     "black"  "grey" 
+
+
+####################################
+# Calculate eigengenes 
+####################################
+MEList=moduleEigengenes(datExpr,colors=moduleColors2) 
+names(MEList)
+MEs = MEList$eigengenes
+
+
+
+# check rownames
+rownames(MEs) == rownames(datExpr)
+MET=orderMEs(MEs)
+rownames(MET)
+colnames(MET) <- sub('..', '', colnames(MET))
+####################################
+# plot the tree
+####################################
+ plotDendroAndColors(geneTree, colors = moduleColors2, 
+                     groupLabels = c("hybrid_deepSplit 2"), 
+                     dendroLabels = FALSE, 
+                     hang = 0.03, 
+                     addGuide = TRUE, 
+                     guideHang = 0.05)
+
+####################################
+# plot module eigengenes
+####################################
+datColors=data.frame(moduleColors2)[MET$blockGenes,]
+plotEigengeneNetworks(MET,"",marDendro=c(0,4,1,2), marHeatmap=c(3,4,1,2),
+                      cex.lab=0.8,
+                      xLabelsAngle=90, 
+                      letterSubPlots = TRUE,
+                      greyLabel = "grey", 
+                      plotDendrograms = TRUE, 
+                      plotHeatmaps= TRUE, 
+                      signed = TRUE, 
+                      plotAdjacency= FALSE,
+                      printAdjacency = TRUE,
+                      colorLabels = TRUE,
+                      )
+
+####################################
+# plot topological overlap matrix
+####################################
+TOMplot(dissim=dissTOM^13,dendro=geneTree,
+        colors= moduleColors2, 
+        ColorsLeft= moduleColors2,  
+        main = "Topological Overlap Matrix")
+
+####################################
+# MDS plot 
+####################################
+
+cmd1=cmdscale(as.dist(dissTOM),2)
+par(mfrow=c(1,1))
+plot(cmd1[,1], cmd1[,2], col=moduleColors2,
+     main="MDS plot ", 
+     xlab="Scaling Dimension 1",
+     ylab="Scaling Dimension 2" )
+
+
+
+```
+
+
+
+# Protein Module Assignment Dataset
+
+```{r}
+
+
+names(moduleColors2) <- colnames(A)
+
+module_df <- data.frame(
+    protein_names = names(moduleColors2),
+    module_assignment = moduleColors2
+)
+
+
+red_module <- module_df[module_df$module_assignment=="red", ]
+colnames(red_module) <- c("GeneID", "module_assignment")
+dim(red_module) # 37  2
+blue_module <- module_df[module_df$module_assignment=="blue", ]
+colnames(blue_module) <- c("GeneID", "module_assignment")
+dim(blue_module) # 108  2  
+
+```
+
+
+
+
+
+```{r}
+traitData$CaseControlNUMERIC <- as.character(sapply(traitData$SampleID, function(id) {
+  if (grepl("ILD", id)) {
+    return(1)
+  } else if (grepl("PM", id)) {
+    return(2)
+  }
+}))
+traitData$CaseControlNUMERIC <- as.numeric(traitData$CaseControlNUMERIC)
+
+
+
+```
+
+
+# Correlate eigengenes with Case Control status
+
+
+
+```{r}
+
+require(ggpubr)
+require(tidyverse)
+require(Hmisc)
+require(corrplot)
+
+dim(datExpr)
+dim(traitData)
+rownames(datExpr) ==traitData$SampleID
+
+library(dplyr)
+
+correlation_data <- data.frame()
+
+
+for (eigenprotein in colnames(MET)) {
+  
+# eigengene =   "red"  
+  
+ 
+
+ 
+modCor = cor.test(MET[,eigenprotein ],traitData$CaseControlNUMERIC, use = "p", exact = NULL,)
+
+result_data <- data.frame(
+  "correlation" = modCor[["estimate"]],
+  "p_value" = modCor[["p.value"]]
+  
+)
+rownames(result_data) = paste0(eigenprotein)
+
+correlation_data <- rbind(correlation_data, result_data)
+
+
+}
+colnames(correlation_data)
+
+
+correlation_data$p_fdr <- p.adjust(correlation_data$p_value, method = "fdr")
+
+
+correlation_data$p_bonferroni <- p.adjust(correlation_data$p_value,  method = "bonferroni")
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

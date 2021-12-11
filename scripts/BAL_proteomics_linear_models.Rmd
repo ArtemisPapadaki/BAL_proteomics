@@ -1,0 +1,141 @@
+---
+title: "BAL_proteomics: Linear models predicting NPX protein levels from flow data"
+author: "Artemis Papadaki"
+date: sys.Date()
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 2
+---
+
+# Setup and read in data
+
+```{r setup, include = FALSE}
+# rmd options
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(caret)
+library(lattice)
+library(gridExtra)
+library(splines)
+library(ggeffects)
+library(lmerTest)
+
+
+theme_set(theme_pubr())
+
+
+
+```
+
+# Fit linear models to estimate NPX protein levels from flow data
+
+This analysis will be done on cases and patient data for :
+ "cells.x10_6_ml", "mac_percent_of_live_CD45","cd14_mono_percent_of_live_CD45","cd14_cd16_mono_percent_of_live_CD45","cd16_mono_percent_of_live_CD45" ,"t.cell_percent_of_live_CD45","nk_t.cell_percent_of_live_CD45" ,"cd19_b.cell_percent_of_live_CD45", "cd56_nk_percent_of_live_CD45","basophil_percent_of_live_CD45","neutrophil_percent_of_live_CD45","eosinophil_percent_of_live_CD45","lymphocytes_percent_of_live_CD45" ,"total_mono_percent_of_live_CD45","CD14_mono_percent_of_total_mono","CD14_CD16_.mono_percent_of_total_mono"  ,"CD16_.mono_percent_of_total_mono","mac_total_number_of_cells_x10.6","cd14_mono_total_number_of_cells_x10.6" ,"cd14_cd16_mono_total_number_of_cells_x10.6","cd16_mono_total_number_of_cells_x10.6","t.cell_total_number_of_cells_x10.6","nk_t.cell_total_number_of_cells_x10.6" ,"b.cell_total_number_of_cells_x10.6","nk_total_number_of_cells_x10.6","basophil_total_number_of_cells_x10.6","neutrophil_total_number_of_cells_x10.6", "eosinophil_total_number_of_cells_x10.6","lymphocytes_total_number_of_cells_x10.6","total_mono_total_number_of_cells_x10.6","CD14_mono_._of_total_mono_total_number_of_cells","CD14_CD16_mono_._of_total_mono_total_number_of_cells", "CD16_mono_._of_total_mono_total_number_of_cells"  
+
+
+
+# Reading in the data.
+
+
+```{r}
+
+
+bal_long <- read.csv("../data/bal_long_personal_clinical_flow.csv")
+
+bal_long$CaseControl <- ordered(bal_long$CaseControl, levels = c("ctrl" , "case"))
+
+data_long_cases_bal <- dplyr::filter(bal_long, CaseControl == "case") 
+ library(caret)
+
+ 
+ 
+ 
+ 
+
+```
+
+
+
+
+# fit the models
+
+```{r}
+
+
+
+
+for (Trait in c( "cells.x10_6_ml", "mac_percent_of_live_CD45","cd14_mono_percent_of_live_CD45","cd14_cd16_mono_percent_of_live_CD45","cd16_mono_percent_of_live_CD45" ,"t.cell_percent_of_live_CD45","nk_t.cell_percent_of_live_CD45" ,"cd19_b.cell_percent_of_live_CD45", "cd56_nk_percent_of_live_CD45","basophil_percent_of_live_CD45","neutrophil_percent_of_live_CD45","eosinophil_percent_of_live_CD45","lymphocytes_percent_of_live_CD45" ,"total_mono_percent_of_live_CD45","CD14_mono_percent_of_total_mono","CD14_CD16_.mono_percent_of_total_mono"  ,"CD16_.mono_percent_of_total_mono","mac_total_number_of_cells_x10.6","cd14_mono_total_number_of_cells_x10.6" ,"cd14_cd16_mono_total_number_of_cells_x10.6","cd16_mono_total_number_of_cells_x10.6","t.cell_total_number_of_cells_x10.6","nk_t.cell_total_number_of_cells_x10.6" ,"b.cell_total_number_of_cells_x10.6","nk_total_number_of_cells_x10.6","basophil_total_number_of_cells_x10.6","neutrophil_total_number_of_cells_x10.6", "eosinophil_total_number_of_cells_x10.6","lymphocytes_total_number_of_cells_x10.6","total_mono_total_number_of_cells_x10.6","CD14_mono_._of_total_mono_total_number_of_cells","CD14_CD16_mono_._of_total_mono_total_number_of_cells", "CD16_mono_._of_total_mono_total_number_of_cells"  )){   
+   
+
+
+data_long_cases_bal[, paste0(Trait)] <- as.numeric(data_long_cases_bal[, paste0(Trait)])
+ data_long_cases_bal <- preProcess(data_long_cases_bal, method = c("medianImpute", "scale", "center")) %>%
+   predict(data_long_cases_bal)     
+per_prot_models <- list()
+
+for (i in 1:length(unique(data_long_cases_bal$GeneID))) {
+
+
+  plasma_prot <- data_long_cases_bal[data_long_cases_bal$GeneID == unique(data_long_cases_bal$GeneID)[i],]
+
+
+per_prot_models[[unique(data_long_cases_bal$GeneID)[i]]]  <- lm(NPX ~  plasma_prot[,noquote(Trait)], data = plasma_prot)
+  }
+  
+
+library(lmerTest)
+
+
+score_ps <- vector("numeric", length(per_prot_models))
+ps <- vector("numeric", length(per_prot_models))
+event_proc <- vector("numeric", length(per_prot_models))
+
+
+
+for (i in 1:length(per_prot_models)) {
+  ps[i] <- summary(per_prot_models[[i]])$coefficients[2,4]
+  event_proc[i] <- summary(per_prot_models[[i]])$coefficients[2,1]
+
+}
+
+longt_models <- data.frame(GeneID = names(per_prot_models), p=unlist(ps), event_proc=event_proc)
+longt_models$adj_p <- p.adjust(longt_models$p, method="fdr")
+longt_models$adj_p[longt_models$adj_p == 0] <- min(longt_models$adj_p[longt_models$adj_p != 0])
+longt_models$logp <- -log10(longt_models$p)
+longt_models$log_adj_p <- -log10(longt_models$adj_p)
+longt_models$trait <- Trait
+
+write.csv(longt_models, paste0("../results_linearPlots/", Trait, "_linearModels.csv"))
+
+g <- ggplot(longt_models, aes(x=event_proc, y=logp, colour=factor(ifelse(adj_p < 0.05, "<0.05", "NS"), levels=c("NS", "<0.05")))) + geom_text_repel(aes(label=ifelse(log_adj_p > -log10(0.05), as.character(GeneID),'')),hjust=0,vjust=0,  nudge_x = 0.01, nudge_y = 0.3) +
+    geom_point(alpha=0.9) +
+    ylab("-log10 Pvalue)") +
+    xlab(paste0(Trait, " Bal Linear Coefficient")) +
+    labs(colour = "Pvalue") +
+    geom_text_repel(data=subset(longt_models,
+                                  ((event_proc > 2) & adj_p < 0.05)),
+                    aes(event_proc, logp, label = GeneID), size = 8, color="steelblue") + 
+  # geom_hline(yintercept = -log10(0.05), linetype="dotted") + 
+  theme(axis.text.x = element_text(color = "grey20", size = 20, angle = 0, hjust = .5, vjust = .5, face = "plain"),
+        axis.text.y = element_text(color = "grey20", size = 20, angle = 90, hjust = 1, vjust = 0, face = "plain"),  
+        axis.title.x = element_text(color = "grey20", size = 20, angle = 0, hjust = .5, vjust = 0, face = "plain"),
+        axis.title.y = element_text(color = "grey20", size = 20, angle = 90, hjust = .5, vjust = .5, face = "plain"))
+
+
+
+png(paste0("../results_linearPlots/", Trait, "_bal_linearModels.png"), width = 1200, height=748)
+
+print(g)
+dev.off()
+
+ }
+ 
+
+
+```
+
+
+

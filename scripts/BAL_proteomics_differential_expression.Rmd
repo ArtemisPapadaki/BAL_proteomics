@@ -1,0 +1,207 @@
+---
+title: "BAL_proteomics: Differential_Expression"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+
+# linear models
+# NPX~CaseControl
+
+#---------------------- load packages
+
+
+```{r}
+
+library(ggplot2)
+library(viridis)
+library(ggpubr)
+library(dplyr)
+library(reshape2)
+library(RColorBrewer)
+library(caret)
+library(tidyverse)
+library(ggrepel )
+
+
+theme_set(theme_pubr())
+theme_update(text = element_text(size=11))
+
+set.seed(1)
+
+
+
+```
+
+
+#----------------------load data
+
+```{r}
+
+
+
+bal_long <- read.csv("../data/bal_long_personal_clinical_flow.csv")
+
+bal_long$CaseControl <- ordered(bal_long$CaseControl, levels = c("ctrl" , "case"))
+ 
+
+
+```
+
+
+
+# Generate Models
+
+
+```{r}
+
+
+single_lm <- function(data, formula_string) {
+    
+    out.model <- tryCatch(lm(as.formula(formula_string),
+                                         data=data)
+    )
+}
+
+formula_string <- paste0("NPX ~ CaseControl")
+
+
+
+lmm_prot_models <- bal_long %>%
+    group_by(GeneID) %>%
+    group_map(~single_lm(data=.x, formula_string = formula_string))
+
+mod_names <- bal_long %>%
+    group_by(GeneID) %>%
+    group_data() %>%
+    dplyr::select(GeneID)
+
+names(lmm_prot_models) <- as.vector(mod_names$GeneID)
+
+```
+
+
+# create a dataframe with results
+
+```{r}
+
+lms <- data.frame(GeneID = names(lmm_prot_models),
+                  effect = vector("numeric", length(lmm_prot_models)) )
+
+pv_vector <- vector("numeric", length(lmm_prot_models))
+for (i in 1:nrow(lms)) {
+  
+
+  
+  GeneID <- lms$GeneID[i]
+  pv_vector[i] <- coef(summary(lmm_prot_models[[GeneID]]))[2,4]
+}
+lms$p_val <- pv_vector
+lms$p_val_adjusted <- p.adjust(lms$p_val, method = "fdr")
+lms <- lms %>%
+mutate(Threshold  = ifelse(p_val_adjusted<0.05,"Significant","Non-significant"))
+  
+
+effect_vector <- vector("numeric", length(lmm_prot_models))
+for (i in 1:nrow(lms)) {
+  GeneID <- lms$GeneID[i]
+  effect_vector[i] <- coef(summary(lmm_prot_models[[GeneID]]))[2,1]
+}
+lms$effect <- effect_vector
+
+
+standardError_vector <- vector("numeric", length(lmm_prot_models))
+for (i in 1:nrow(lms)) {
+  GeneID <- lms$GeneID[i]
+  standardError_vector[i] <- coef(summary(lmm_prot_models[[GeneID]]))[2,2]
+}
+lms$standardError <- standardError_vector
+
+lms <- lms %>% 
+  arrange(p_val_adjusted)
+
+
+```
+
+
+# histogram of the p values
+
+```{r}
+
+hist(lms$p_val, breaks = 20, xlab =  "p-value", 
+     main = "Raw p-values, Bal", 
+     freq = TRUE , ylab = "Frequency") # each column has width of 0.05
+
+
+```
+
+
+
+# histogram of the fold change values
+
+
+```{r}
+
+
+hist(lms$effect, xlab = "Fold Change (Control vs Case)", 
+     main = "Fold Change in Bal")
+
+
+```
+
+
+
+
+# Volcano plot
+
+```{r}
+
+logp_label=6
+fc_label=c(-0.5, 1)
+
+ggplot(data = lms, aes(x = effect, y = -1*log10(p_val), colour=factor(ifelse(p_val_adjusted < 0.05, "<0.05", "NS"), levels=c("NS", "<0.05")))) +
+  geom_point(alpha=0.7) +
+  labs(colour = "Adjusted Pvalue") +
+  scale_color_manual(values=c("black",  "#D7191C", "#2C7BB6"))+
+  geom_text_repel(data=subset(lms,
+                              -1*log10(p_val) > logp_label | 
+                                ( p_val_adjusted < 0.05)),
+                  aes(effect, -1*log10(p_val), label = GeneID), size = 3, color="darkblue"
+  ) + theme(axis.text.x = element_text(size = 19),
+            axis.text.y = element_text(size = 19),
+    plot.title = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank())
+
+
+```
+
+
+
+#  QQ plot
+
+```{r}
+
+bal <- lms
+obs <- sort(bal$p_val)
+ex <- (1:length(obs) ) / (length(obs)+1)
+
+
+par(pty='s', mfrow=c(1,2), las=1, mar=c(4,4,1,0.5), cex=0.8)
+plot( -log10(ex) , -log10(obs),
+      xlab= "-log10 expected P",
+      ylab= "-log10 observed P",
+      main= "Bal case vs cntl lm QQ plot") +
+  abline(a=0,b=1)
+
+
+
+```
+
+
