@@ -24,7 +24,7 @@ library(ggeffects)
 library(WGCNA)
 library(flashClust)
 library(tidyverse)
-
+library(ggrepel )
 theme_set(theme_pubr())
 
 
@@ -38,7 +38,7 @@ theme_set(theme_pubr())
 ```{r}
 bal_long <- read.csv("../data/bal_long_personal_clinical_flow.csv")
 
-dim(bal_long) # 12180   193
+
 bal_long$CaseControl <- factor(bal_long$CaseControl, levels = c("ctrl", "case" ))
 
 bal_matrix <- bal_long %>% 
@@ -47,7 +47,7 @@ bal_matrix <- bal_long %>%
   tidyr::spread(GeneID, NPX) %>% 
   column_to_rownames('SampleID')   # contains only NPX values
 
-dim(bal_matrix) # 28 435
+
 
 bal_matrix <- preProcess(bal_matrix, method = c("knnImpute", "scale", "center")) %>%
   predict(bal_matrix) %>%
@@ -204,10 +204,10 @@ module_df <- data.frame(
 
 red_module <- module_df[module_df$module_assignment=="red", ]
 colnames(red_module) <- c("GeneID", "module_assignment")
-dim(red_module) # 37  2
+
 blue_module <- module_df[module_df$module_assignment=="blue", ]
 colnames(blue_module) <- c("GeneID", "module_assignment")
-dim(blue_module) # 108  2  
+
 
 ```
 
